@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8">
+    <title>视频截图工具</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link href="https://fonts.googleapis.com/css?family=Arimo:400,700" rel="stylesheet">
+    <link href="css/settings.css" rel="stylesheet">
+  </head>
+  <body>
+    <div id="container">
+      <div id="inner">
+        <div class="setting">
+          <div class="label">文件类型</div>
+          <div id="fileTypeControl" class="control"></div>
+        </div>
+        <div class="setting">
+          <div class="label">保存位置</div>
+          <div id="saveLocationControl" class="control">
+            <div class="save-location-input">
+              <input type="text" id="saveLocation" placeholder="例如: 视频截图/网站名称" />
+              <div class="save-location-help">
+                输入相对于下载文件夹的子文件夹路径，留空则保存至下载文件夹根目录
+              </div>
+              <div class="save-location-options">
+                <label>
+                  <input type="checkbox" id="autoSave" />
+                  <span>自动保存(不弹出保存对话框)</span>
+                </label>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div class="setting">
+          <div class="label">快捷键</div>
+          <div id="keyboardShortcutControl" class="control">
+            <div class="shortcut-display">
+              <span id="currentShortcut">加载中...</span>
+              <button id="openShortcutPage" class="shortcut-button">修改快捷键</button>
+            </div>
+            <div class="shortcut-help">
+              点击"修改快捷键"按钮前往Chrome扩展快捷键设置页面
+            </div>
+          </div>
+        </div>
+        <div class="action-buttons">
+          <div id="takeScreenshot" class="button">截取屏幕截图</div>
+        </div>
+        <div id="screenshotStatus" class="screenshot-status" aria-live="polite"></div>
+      </div>
+    </div>
+    <script src="js/popup.js"></script>
+  </body>
+</html> 

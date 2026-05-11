@@ -1,0 +1,57 @@
+{
+  "manifest_version": 3,
+  "name": "视频截图工具",
+  "version": "1.0.0",
+  "description": "使用此扩展程序，您可以下载完整分辨率的截图，无需看到播放器控件或周围的网页内容。",
+  "permissions": [
+    "activeTab",
+    "storage",
+    "downloads",
+    "commands"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ],
+  "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_popup": "popup.html",
+    "default_title": "视频截图工具"
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "background": {
+    "service_worker": "js/background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["js/content.js"],
+      "css": ["css/style.css"],
+      "all_frames": true
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "icons/*",
+        "images/*"
+      ],
+      "matches": ["<all_urls>"]
+    }
+  ],
+  "commands": {
+    "take-screenshot": {
+      "suggested_key": {
+        "default": "Alt+S"
+      },
+      "description": "截取视频截图"
+    }
+  }
+} 

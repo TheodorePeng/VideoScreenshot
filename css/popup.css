@@ -1,0 +1,49 @@
+body {
+  font-family: 'Arimo', sans-serif;
+  font-size: 14px;
+  margin: 0;
+  padding: 0;
+  background-color: #f7f7f7;
+}
+
+#container {
+  width: 200px;
+  padding: 15px;
+}
+
+#inner {
+  background-color: #fff;
+  border-radius: 5px;
+  padding: 15px;
+  box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.button {
+  background-color: #2196F3;
+  color: white;
+  border: none;
+  border-radius: 3px;
+  padding: 10px 15px;
+  font-weight: bold;
+  cursor: pointer;
+  text-align: center;
+  margin-bottom: 15px;
+  width: 100%;
+}
+
+.button:hover {
+  background-color: #0b7dda;
+}
+
+#settings {
+  color: #2196F3;
+  text-decoration: none;
+  font-size: 12px;
+}
+
+#settings:hover {
+  text-decoration: underline;
+} 
