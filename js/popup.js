@@ -8,10 +8,10 @@ const fileTypeOptions = [
 
 // 默认设置
 const defaultSettings = {
-  fileType: 'png',
+  fileType: 'clipboard',
   shortcut: 'Alt+S',
   saveLocation: '',
-  autoSave: false
+  autoSave: true
 };
 
 // 按键映射表（用于在Windows和Mac之间显示不同按键名称）
@@ -70,14 +70,39 @@ function requestScreenshot() {
   button.classList.add('disabled');
 
   chrome.storage.sync.get(defaultSettings, (settings) => {
+    const requestSettings = { ...settings };
+    if (settings.fileType === 'clipboard') {
+      requestSettings.clipboardDelivery = 'popup';
+      requestSettings.suppressPageNotification = true;
+    }
+
     chrome.runtime.sendMessage({
       action: 'requestActiveTabScreenshot',
-      settings: settings
-    }, response => {
+      settings: requestSettings
+    }, async response => {
       button.classList.remove('disabled');
 
       if (chrome.runtime.lastError) {
         setScreenshotStatus(chrome.runtime.lastError.message || '截图失败', 'fail');
+        return;
+      }
+
+      if (
+        settings.fileType === 'clipboard' &&
+        response &&
+        response.success &&
+        response.dataUrl
+      ) {
+        const clipboardResponse = await writeDataUrlToClipboard(response.dataUrl);
+        if (clipboardResponse.success) {
+          setScreenshotStatus('截图已复制到剪贴板', 'success');
+          setTimeout(() => {
+            window.close();
+          }, 500);
+          return;
+        }
+
+        setScreenshotStatus(clipboardResponse.error || '复制到剪贴板失败', 'fail');
         return;
       }
 
@@ -92,6 +117,35 @@ function requestScreenshot() {
       setScreenshotStatus(response && response.error ? response.error : '截图失败', 'fail');
     });
   });
+}
+
+async function writeDataUrlToClipboard(dataUrl) {
+  if (!dataUrl || typeof dataUrl !== 'string' || !dataUrl.startsWith('data:image/png')) {
+    return { success: false, error: '无效的剪贴板图像数据' };
+  }
+
+  if (!navigator.clipboard || !window.ClipboardItem) {
+    return { success: false, error: '当前浏览器不支持图片剪贴板写入' };
+  }
+
+  try {
+    const response = await fetch(dataUrl);
+    const blob = await response.blob();
+
+    await navigator.clipboard.write([
+      new ClipboardItem({
+        'image/png': blob
+      })
+    ]);
+
+    return { success: true, clipboard: true };
+  } catch (error) {
+    console.error('[popup] 复制到剪贴板失败:', error);
+    return {
+      success: false,
+      error: error && error.message ? error.message : '复制到剪贴板失败'
+    };
+  }
 }
 
 // 设置截图状态提示
@@ -208,29 +262,19 @@ function loadSettings() {
     
     // 设置自动保存选项
     const autoSaveCheckbox = document.getElementById('autoSave');
-    autoSaveCheckbox.checked = settings.autoSave || false;
+    autoSaveCheckbox.checked = settings.autoSave !== false;
   });
 }
 
 // 保存设置到存储
 function saveSettings(newSettings) {
-  console.log('正在保存新设置:', newSettings); // 调试日志
-  
   chrome.storage.sync.get(defaultSettings, (currentSettings) => {
-    console.log('获取到的当前设置:', currentSettings); // 调试日志
-    
     // 合并当前设置和新设置
     const updatedSettings = { ...currentSettings, ...newSettings };
-    console.log('合并后的设置:', updatedSettings); // 调试日志
-    
+
     // 使用chrome.storage.sync持久化保存设置
     chrome.storage.sync.set(updatedSettings, () => {
-      console.log('设置已保存:', updatedSettings);
-      
-      // 立即读取设置以验证保存是否成功
-      chrome.storage.sync.get(null, (savedSettings) => {
-        console.log('验证保存的设置:', savedSettings); // 调试日志
-      });
+      // 设置已保存
     });
   });
 } 

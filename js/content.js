@@ -1,10 +1,16 @@
 // 默认设置
 const defaultSettings = {
-  fileType: 'png',
+  fileType: 'clipboard',
   saveLocation: '',
-  autoSave: false
+  autoSave: true
 };
 
+const EXTERNAL_COMMAND_EVENT = 'VIDEO_SCREENSHOT_EXTERNAL_COMMAND';
+const EXTERNAL_RESULT_EVENT = 'VIDEO_SCREENSHOT_EXTERNAL_COMMAND_RESULT';
+const EXTERNAL_ACTION_TAKE_SCREENSHOT = 'take-screenshot';
+const EXTERNAL_BACKGROUND_ACTION = 'videoScreenshotExternalTrigger';
+const MESSAGE_COPY_TO_CLIPBOARD = 'copyScreenshotToClipboard';
+const MESSAGE_WRITE_CLIPBOARD = 'writeScreenshotImageToClipboard';
 const PROTECTED_VIDEO_ERROR = '该视频源受浏览器保护，无法直接截图';
 const MIN_VISIBLE_SIZE = 40;
 
@@ -21,6 +27,7 @@ let registeredHasVideo = false;
 function init() {
   currentPlatform = detectPlatform();
   setupVideoDetection();
+  setupExternalTriggerBridge();
 
   document.addEventListener('fullscreenchange', handleFullscreenChange);
   document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
@@ -372,11 +379,11 @@ async function takeScreenshot(settingsOverride) {
   }
 
   if (!videoElement) {
-    return finishScreenshot({ success: false, error: '截图失败：未找到视频元素' });
+    return finishScreenshot({ success: false, error: '截图失败：未找到视频元素' }, settings);
   }
 
   if (!videoElement.videoWidth || !videoElement.videoHeight) {
-    return finishScreenshot({ success: false, error: '截图失败：视频画面尚未准备好' });
+    return finishScreenshot({ success: false, error: '截图失败：视频画面尚未准备好' }, settings);
   }
 
   try {
@@ -399,9 +406,9 @@ async function takeScreenshot(settingsOverride) {
     restoreScreenshotEnvironment();
 
     const fileType = settings.fileType || 'png';
-    const result = await processScreenshot(canvas, fileType);
+    const result = await processScreenshot(canvas, fileType, settings);
 
-    return finishScreenshot(result);
+    return finishScreenshot(result, settings);
   } catch (error) {
     restoreScreenshotEnvironment();
     console.error('截图过程出错:', error);
@@ -411,23 +418,27 @@ async function takeScreenshot(settingsOverride) {
       ? PROTECTED_VIDEO_ERROR
       : (error.message || '截图失败，请重试');
 
-    return finishScreenshot({ success: false, error: errorMessage });
+    return finishScreenshot({ success: false, error: errorMessage }, settings);
   }
 }
 
-function finishScreenshot(result) {
+function finishScreenshot(result, settings = {}) {
+  const suppressPageNotification = !!settings.suppressPageNotification;
+
   if (screenshotButton) {
     screenshotButton.style.opacity = isFullscreen ? '0.2' : '0.25';
 
-    if (result.success) {
+    if (result.success && !suppressPageNotification) {
       animateButtonSuccess();
     }
   }
 
-  showNotification(
-    result.success ? getSuccessMessage(result) : (result.error || '截图失败，请重试'),
-    result.success ? 'success' : 'fail'
-  );
+  if (!suppressPageNotification) {
+    showNotification(
+      result.success ? getSuccessMessage(result) : (result.error || '截图失败，请重试'),
+      result.success ? 'success' : 'fail'
+    );
+  }
 
   return result;
 }
@@ -469,39 +480,297 @@ function restoreScreenshotEnvironment() {
   }
 }
 
-function processScreenshot(canvas, fileType) {
+function processScreenshot(canvas, fileType, settings) {
   if (fileType === 'clipboard') {
-    return copyCanvasToClipboard(canvas);
+    return copyCanvasToClipboard(canvas, settings || {});
   }
 
   return downloadCanvas(canvas, fileType);
 }
 
-function copyCanvasToClipboard(canvas) {
-  return new Promise(resolve => {
-    if (!navigator.clipboard || !window.ClipboardItem) {
-      resolve({ success: false, error: '您的浏览器不支持复制到剪贴板' });
-      return;
+async function copyCanvasToClipboard(canvas, settings) {
+  const blob = await canvasToPngBlob(canvas);
+
+  if (settings.clipboardDelivery === 'popup') {
+    const dataUrl = await blobToDataUrl(blob);
+    return { success: true, clipboard: true, dataUrl };
+  }
+
+  if (canWriteClipboardHere()) {
+    try {
+      return await writeBlobToClipboard(blob);
+    } catch (error) {
+      console.warn('[VideoScreenshot] 当前 frame 剪贴板写入失败，尝试转交顶层页面:', error);
+    }
+  }
+
+  const dataUrl = await blobToDataUrl(blob);
+  const response = await sendRuntimeMessage({
+    action: MESSAGE_COPY_TO_CLIPBOARD,
+    dataUrl
+  });
+
+  if (response && response.success) {
+    return { success: true, clipboard: true };
+  }
+
+  return {
+    success: false,
+    error: response && response.error ? response.error : '复制到剪贴板失败'
+  };
+}
+
+function canvasToPngBlob(canvas) {
+  return new Promise((resolve, reject) => {
+    try {
+      canvas.toBlob(blob => {
+        if (blob) {
+          resolve(blob);
+          return;
+        }
+
+        reject(new Error('生成剪贴板图像失败'));
+      }, 'image/png');
+    } catch (error) {
+      reject(error);
+    }
+  }).catch(error => {
+    console.error('生成剪贴板图像失败:', error);
+    if (error && (error.name === 'SecurityError' || error.name === 'NotSupportedError')) {
+      throw new Error(PROTECTED_VIDEO_ERROR);
     }
 
-    canvas.toBlob(blob => {
-      if (!blob) {
-        resolve({ success: false, error: PROTECTED_VIDEO_ERROR });
+    throw error;
+  });
+}
+
+function blobToDataUrl(blob) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === 'string') {
+        resolve(reader.result);
         return;
       }
 
-      navigator.clipboard.write([
-        new ClipboardItem({
-          'image/png': blob
-        })
-      ]).then(() => {
-        resolve({ success: true, clipboard: true });
-      }).catch(error => {
-        console.error('复制到剪贴板失败:', error);
-        resolve({ success: false, error: '复制到剪贴板失败' });
-      });
-    }, 'image/png');
+      reject(new Error('生成剪贴板图像失败'));
+    };
+    reader.onerror = () => {
+      reject(reader.error || new Error('生成剪贴板图像失败'));
+    };
+    reader.readAsDataURL(blob);
   });
+}
+
+function canWriteClipboardHere() {
+  return !!(
+    window.isSecureContext &&
+    document.hasFocus() &&
+    navigator.clipboard &&
+    window.ClipboardItem
+  );
+}
+
+async function writeDataUrlToClipboard(dataUrl) {
+  if (!isValidPngDataUrl(dataUrl)) {
+    return { success: false, error: '无效的剪贴板图像数据' };
+  }
+
+  if (!navigator.clipboard || !window.ClipboardItem) {
+    return { success: false, error: '当前浏览器不支持图片剪贴板写入' };
+  }
+
+  if (!window.isSecureContext) {
+    return { success: false, error: '当前页面不是安全上下文，无法写入剪贴板' };
+  }
+
+  try {
+    const blob = await dataUrlToBlob(dataUrl);
+    return await writeBlobToClipboard(blob);
+  } catch (error) {
+    console.error('[VideoScreenshot] 复制到剪贴板失败:', error);
+    return {
+      success: false,
+      error: error && error.message ? error.message : '复制到剪贴板失败'
+    };
+  }
+}
+
+async function dataUrlToBlob(dataUrl) {
+  const response = await fetch(dataUrl);
+  return response.blob();
+}
+
+async function writeBlobToClipboard(blob) {
+  await navigator.clipboard.write([
+    new ClipboardItem({
+      'image/png': blob
+    })
+  ]);
+
+  return { success: true, clipboard: true };
+}
+
+function isValidPngDataUrl(dataUrl) {
+  return typeof dataUrl === 'string' && dataUrl.startsWith('data:image/png');
+}
+
+function sendRuntimeMessage(message) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage(message, response => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+
+      resolve(response);
+    });
+  });
+}
+
+function setupExternalTriggerBridge() {
+  if (window.top !== window) return;
+
+  window.addEventListener(EXTERNAL_COMMAND_EVENT, event => {
+    handleExternalCommand(event);
+  });
+}
+
+async function handleExternalCommand(event) {
+  const detail = readExternalCommandDetail(event);
+
+  if (!detail) {
+    dispatchExternalResult({
+      ok: false,
+      action: 'unknown',
+      error: {
+        code: 'INVALID_DETAIL',
+        message: 'Command detail 必须是对象'
+      }
+    });
+    return;
+  }
+
+  const validationError = validateExternalCommand(detail);
+  if (validationError) {
+    dispatchExternalResult(validationError);
+    return;
+  }
+
+  try {
+    const response = await sendExternalTriggerMessage(detail);
+
+    if (response && typeof response.ok === 'boolean') {
+      if (response.result) {
+        delete response.result.dataUrl;
+      }
+      dispatchExternalResult(response);
+      return;
+    }
+
+    dispatchExternalResult(createExternalFailure(
+      detail,
+      'INVALID_RESPONSE',
+      '扩展后台返回了无效响应'
+    ));
+  } catch (error) {
+    dispatchExternalResult(createExternalFailure(
+      detail,
+      'BACKGROUND_ERROR',
+      error && error.message ? error.message : '外部触发失败'
+    ));
+  }
+}
+
+function readExternalCommandDetail(event) {
+  const detail = event.detail;
+  if (!isObjectRecord(detail)) return null;
+  return detail;
+}
+
+function validateExternalCommand(detail) {
+  if (detail.action !== EXTERNAL_ACTION_TAKE_SCREENSHOT) {
+    return createExternalFailure(
+      detail,
+      'INVALID_ACTION',
+      `不支持的外部触发 action: ${String(detail.action)}`
+    );
+  }
+
+  if (detail.requestId !== undefined && typeof detail.requestId !== 'string') {
+    return createExternalFailure(
+      detail,
+      'INVALID_REQUEST_ID',
+      'requestId 必须是字符串'
+    );
+  }
+
+  if (detail.payload !== undefined && !isEmptyObjectPayload(detail.payload)) {
+    return createExternalFailure(
+      detail,
+      'INVALID_PAYLOAD',
+      'take-screenshot 只支持空对象 payload'
+    );
+  }
+
+  return null;
+}
+
+function sendExternalTriggerMessage(detail) {
+  return new Promise((resolve, reject) => {
+    chrome.runtime.sendMessage({
+      action: EXTERNAL_BACKGROUND_ACTION,
+      command: EXTERNAL_ACTION_TAKE_SCREENSHOT,
+      requestId: getExternalRequestId(detail)
+    }, response => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+
+      resolve(response);
+    });
+  });
+}
+
+function dispatchExternalResult(result) {
+  window.dispatchEvent(new CustomEvent(EXTERNAL_RESULT_EVENT, {
+    detail: result
+  }));
+}
+
+function createExternalFailure(detail, code, message) {
+  const result = {
+    ok: false,
+    action: getExternalAction(detail),
+    error: {
+      code,
+      message
+    }
+  };
+
+  const requestId = getExternalRequestId(detail);
+  if (requestId !== undefined) {
+    result.requestId = requestId;
+  }
+
+  return result;
+}
+
+function getExternalRequestId(detail) {
+  return typeof detail.requestId === 'string' ? detail.requestId : undefined;
+}
+
+function getExternalAction(detail) {
+  return typeof detail.action === 'string' ? detail.action : 'unknown';
+}
+
+function isObjectRecord(value) {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function isEmptyObjectPayload(value) {
+  return isObjectRecord(value) && Object.keys(value).length === 0;
 }
 
 function downloadCanvas(canvas, fileType) {
@@ -573,6 +842,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.action === 'pingVideoStatus') {
     scanForBestVideo();
     sendResponse({ success: true, hasVideo: !!videoElement });
+    return true;
+  }
+
+  if (message.action === MESSAGE_WRITE_CLIPBOARD) {
+    writeDataUrlToClipboard(message.dataUrl).then(sendResponse);
     return true;
   }
 

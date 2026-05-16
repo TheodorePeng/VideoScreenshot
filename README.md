@@ -1,6 +1,6 @@
 # 视频截图工具 (Video Screenshot)
 
-**版本：1.0.0**
+**版本：1.0.2**
 
 这是一个浏览器扩展，可以帮助您从各种流媒体网站获取高质量的视频截图，无需看到播放器控件或周围的网页内容。
 
@@ -11,6 +11,7 @@
 - **多种输出格式**：PNG、JPG、WebP，或一键复制到剪贴板
 - **自定义保存路径**：支持设置下载子文件夹，支持自动保存（不弹对话框）
 - **快捷键支持**：默认 `Alt+S`，可前往 Chrome 扩展快捷键页面自定义
+- **外部触发支持**：可通过 Keyboard Maestro / AppleScript 在当前网页 dispatch 自定义事件触发截图
 - **智能截图按钮**：半透明相机图标位于视频右上角，鼠标悬停时更明显，不影响观看体验
 - **全屏模式支持**：截图按钮在全屏播放时自动适配位置
 - **截图反馈**：成功时按钮播放脉冲动画，顶部滑出通知提示
@@ -54,12 +55,12 @@
 
 ```
 VideoScreenshot/
-├── manifest.json        # 扩展配置（版本 1.0.0）
+├── manifest.json        # 扩展配置（版本 1.0.2）
 ├── popup.html           # 扩展弹出窗口
 ├── firstrun.html        # 首次安装欢迎页
 ├── js/
 │   ├── content.js       # 内容脚本：视频检测、按钮注入、截图核心
-│   ├── background.js    # Service Worker：消息路由、下载、frame 注册表
+│   ├── background.js    # Service Worker：消息路由、下载、剪贴板、frame 注册表
 │   ├── popup.js         # 弹出窗口逻辑
 │   ├── settings.js      # 设置页面（备用）
 │   └── firstrun.js      # 欢迎页脚本

@@ -8,7 +8,8 @@ const fileTypeOptions = [
 
 // 默认设置
 const defaultSettings = {
-  fileType: 'png'
+  fileType: 'clipboard',
+  autoSave: true
 };
 
 // 初始化设置页面
@@ -62,4 +63,4 @@ function saveSettings(newSettings) {
       console.log('设置已保存:', updatedSettings);
     });
   });
-} 
+}

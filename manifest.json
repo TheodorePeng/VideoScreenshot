@@ -1,13 +1,14 @@
 {
   "manifest_version": 3,
   "name": "视频截图工具",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "使用此扩展程序，您可以下载完整分辨率的截图，无需看到播放器控件或周围的网页内容。",
   "permissions": [
     "activeTab",
     "storage",
     "downloads",
-    "commands"
+    "commands",
+    "clipboardWrite"
   ],
   "host_permissions": [
     "<all_urls>"

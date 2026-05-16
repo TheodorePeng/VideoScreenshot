@@ -1,11 +1,15 @@
 // 默认设置
 const defaultSettings = {
-  fileType: 'png',
+  fileType: 'clipboard',
   shortcut: 'Alt+S',
   saveLocation: '',
-  autoSave: false
+  autoSave: true
 };
 
+const COMMAND_TAKE_SCREENSHOT = 'take-screenshot';
+const MESSAGE_EXTERNAL_TRIGGER = 'videoScreenshotExternalTrigger';
+const MESSAGE_COPY_TO_CLIPBOARD = 'copyScreenshotToClipboard';
+const MESSAGE_WRITE_CLIPBOARD = 'writeScreenshotImageToClipboard';
 const FRAME_REGISTRY_KEY = 'videoFrameRegistry';
 const FRAME_STATUS_TTL = 15000;
 
@@ -23,9 +27,7 @@ chrome.runtime.onInstalled.addListener((details) => {
     }
 
     if (settingsChanged) {
-      chrome.storage.sync.set(newSettings, () => {
-        console.log('初始化默认设置:', newSettings);
-      });
+      chrome.storage.sync.set(newSettings);
     }
   });
 
@@ -38,7 +40,7 @@ chrome.runtime.onInstalled.addListener((details) => {
 
 // 监听快捷键
 chrome.commands.onCommand.addListener((command) => {
-  if (command === 'take-screenshot') {
+  if (command === COMMAND_TAKE_SCREENSHOT) {
     chrome.storage.sync.get(defaultSettings, (settings) => {
       requestActiveTabScreenshot(settings).then(result => {
         if (!result.success) {
@@ -72,6 +74,16 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  if (message.action === MESSAGE_EXTERNAL_TRIGGER) {
+    handleExternalTrigger(message, sender).then(sendResponse);
+    return true;
+  }
+
+  if (message.action === MESSAGE_COPY_TO_CLIPBOARD) {
+    copyScreenshotToClipboard(message, sender).then(sendResponse);
+    return true;
+  }
+
   if (message.action === 'downloadScreenshot') {
     downloadScreenshot(message).then(sendResponse);
     return true;
@@ -81,7 +93,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 });
 
 async function requestActiveTabScreenshot(settingsOverride) {
-  const settings = settingsOverride || await getSettings();
   const tabs = await queryTabs({ active: true, currentWindow: true });
 
   if (!tabs || tabs.length === 0) {
@@ -89,15 +100,25 @@ async function requestActiveTabScreenshot(settingsOverride) {
   }
 
   const tab = tabs[0];
-  await pingTabFrames(tab.id);
+  return requestTabScreenshot(tab.id, settingsOverride);
+}
 
-  const frame = await selectBestVideoFrame(tab.id);
+async function requestTabScreenshot(tabId, settingsOverride) {
+  const settings = settingsOverride || await getSettings();
+
+  if (tabId === undefined || tabId === null) {
+    return { success: false, error: '未找到当前标签页' };
+  }
+
+  await pingTabFrames(tabId);
+
+  const frame = await selectBestVideoFrame(tabId);
   if (!frame) {
     return { success: false, error: '未检测到可截图视频' };
   }
 
   try {
-    const response = await sendMessageToFrame(tab.id, frame.frameId, {
+    const response = await sendMessageToFrame(tabId, frame.frameId, {
       action: 'takeScreenshot',
       settings
     });
@@ -112,9 +133,70 @@ async function requestActiveTabScreenshot(settingsOverride) {
     };
   } catch (error) {
     console.error('[background] 向视频 frame 发送截图请求失败:', error);
-    await removeFrameFromRegistry(tab.id, frame.frameId);
+    await removeFrameFromRegistry(tabId, frame.frameId);
     return { success: false, error: '视频页面暂时无法响应截图请求' };
   }
+}
+
+async function handleExternalTrigger(message, sender) {
+  const requestId = typeof message.requestId === 'string' ? message.requestId : undefined;
+  const action = typeof message.command === 'string' ? message.command : 'unknown';
+
+  if (message.command !== COMMAND_TAKE_SCREENSHOT) {
+    return createExternalFailure(action, requestId, 'INVALID_ACTION', `不支持的外部触发 action: ${String(message.command)}`);
+  }
+
+  if (message.requestId !== undefined && typeof message.requestId !== 'string') {
+    return createExternalFailure(action, undefined, 'INVALID_REQUEST_ID', 'requestId 必须是字符串');
+  }
+
+  if (!sender.tab || sender.tab.id === undefined) {
+    return createExternalFailure(action, requestId, 'UNSUPPORTED_CONTEXT', '外部触发必须来自标签页内容脚本');
+  }
+
+  try {
+    const result = await requestTabScreenshot(sender.tab.id);
+    if (result && result.success) {
+      return {
+        ok: true,
+        action: COMMAND_TAKE_SCREENSHOT,
+        requestId,
+        result
+      };
+    }
+
+    return createExternalFailure(
+      action,
+      requestId,
+      'SCREENSHOT_FAILED',
+      result && result.error ? result.error : '截图失败'
+    );
+  } catch (error) {
+    console.error('[background] 外部触发截图失败:', error);
+    return createExternalFailure(
+      action,
+      requestId,
+      'SCREENSHOT_FAILED',
+      error && error.message ? error.message : '截图失败'
+    );
+  }
+}
+
+function createExternalFailure(action, requestId, code, message) {
+  const response = {
+    ok: false,
+    action,
+    error: {
+      code,
+      message
+    }
+  };
+
+  if (requestId !== undefined) {
+    response.requestId = requestId;
+  }
+
+  return response;
 }
 
 async function pingTabFrames(tabId) {
@@ -186,11 +268,6 @@ async function selectBestVideoFrame(tabId) {
 }
 
 async function downloadScreenshot(message) {
-  console.log('[background] 收到截图下载请求:', JSON.stringify({
-    fileType: message.fileType,
-    hasDataUrl: !!message.dataUrl
-  }, null, 2));
-
   const settings = await getSettings();
 
   if (!message.dataUrl) {
@@ -233,6 +310,44 @@ async function downloadScreenshot(message) {
   } catch (error) {
     console.error('[background] 下载API出错:', error);
     return { success: false, error: getDownloadErrorMessage(error.message || '') };
+  }
+}
+
+async function copyScreenshotToClipboard(message, sender) {
+  if (!message.dataUrl || typeof message.dataUrl !== 'string') {
+    return { success: false, error: '无效的剪贴板图像数据' };
+  }
+
+  if (!message.dataUrl.startsWith('data:image/png')) {
+    return { success: false, error: '剪贴板只支持 PNG 图像数据' };
+  }
+
+  if (!sender.tab || sender.tab.id === undefined) {
+    return { success: false, error: '剪贴板写入必须来自当前标签页' };
+  }
+
+  try {
+    const response = await sendMessageToFrame(sender.tab.id, 0, {
+      action: MESSAGE_WRITE_CLIPBOARD,
+      dataUrl: message.dataUrl
+    });
+
+    if (response && response.success) {
+      return { success: true, clipboard: true };
+    }
+
+    return {
+      success: false,
+      error: response && response.error ? response.error : '顶层页面复制到剪贴板失败'
+    };
+  } catch (error) {
+    console.error('[background] 剪贴板写入失败:', error);
+    return {
+      success: false,
+      error: error && error.message
+        ? `顶层页面复制到剪贴板失败：${error.message}`
+        : '顶层页面复制到剪贴板失败'
+    };
   }
 }
 
